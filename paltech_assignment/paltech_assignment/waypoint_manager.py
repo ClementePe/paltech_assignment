@@ -5,6 +5,8 @@ from custom_interfaces.msg import Waypoint
 from std_srvs.srv import Trigger
 import json
 
+from pathlib import Path
+
 
 class WaypointManager(Node):
     def __init__(self):
@@ -26,9 +28,63 @@ class WaypointManager(Node):
 
     def set_waypoints_callback(self, request, response):
         response.success = False
-        self.get_logger().info(f"Task 1: Loaded waypoints:  {self.waypoint_list_geo}")
-        # COMPLETE YOUR CODE HERE
-        response.success = True
+
+        try:
+            file_path = Path(request.file_path).expanduser()
+
+            with file_path.open("r", encoding="utf-8") as geojson_file:
+                geojson_data = json.load(geojson_file)
+
+            if geojson_data.get("type") != "FeatureCollection":
+                raise ValueError("The GeoJSON root must be a FeatureCollection")
+
+            features = geojson_data.get("features")
+
+            if not isinstance(features, list) or not features:
+                raise ValueError("The GeoJSON must contain at least one feature")
+
+            loaded_waypoints = []
+            for index, feature in enumerate(features):
+                if not isinstance(feature, dict):
+                    raise ValueError(f"Feature {index} is invalid")
+
+                geometry = feature.get("geometry")
+
+                if not isinstance(geometry, dict) or geometry.get("type") != "Point":
+                    raise ValueError(f"Feature {index} is not a Point")
+
+                coordinates = geometry.get("coordinates")
+
+                if not isinstance(coordinates, list) or len(coordinates) < 2:
+                    raise ValueError(f"Feature {index} has invalid coordinates")
+
+                longitude = float(coordinates[0])
+                latitude = float(coordinates[1])
+
+                if not -180.0 <= longitude <= 180.0:
+                    raise ValueError(f"Feature {index} has an invalid longitude")
+
+                if not -90.0 <= latitude <= 90.0:
+                    raise ValueError(f"Feature {index} has an invalid latitude")
+
+                waypoint = Waypoint()
+                waypoint.latitude = latitude
+                waypoint.longitude = longitude
+                waypoint.orientation = 0.0
+
+                loaded_waypoints.append(waypoint)
+
+            self.waypoint_list_geo = loaded_waypoints
+            self.waypoint_list_robot_frame = []
+
+            self.get_logger().info(
+                f"Loaded {len(self.waypoint_list_geo)} geographic waypoints"
+            )
+
+            response.success = True
+
+        except (OSError, json.JSONDecodeError, TypeError, ValueError) as error:
+            self.get_logger().error(f"Could not load GeoJSON: {error}")
 
         return response
 
