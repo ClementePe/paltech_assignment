@@ -7,6 +7,7 @@ import json
 
 from pathlib import Path
 import math
+import matplotlib.pyplot as plt
 
 
 class WaypointManager(Node):
@@ -25,7 +26,6 @@ class WaypointManager(Node):
 
         self.waypoint_list_geo = []  # needs to be an array of Waypoint() messages
         self.waypoint_list_robot_frame = []
-        self.set_waypoint_client = self.create_client(SetWaypoints, "set_waypoints")
 
     def set_waypoints_callback(self, request, response):
         response.success = False
@@ -77,6 +77,7 @@ class WaypointManager(Node):
 
             self.waypoint_list_geo = loaded_waypoints
             self.convert_waypoints_to_robot_frame()
+            self.plot_waypoints()
 
             self.get_logger().info(
                 f"Loaded {len(self.waypoint_list_geo)} geographic waypoints"
@@ -152,11 +153,63 @@ class WaypointManager(Node):
             )
 
     def plot_waypoints(self):
-        self.get_logger().info(
-            f" Task 3: Plot and save a graph of loaded waypoints in robot coordinate frame (png)"
+        if not self.waypoint_list_robot_frame:
+            self.get_logger().warning("No robot waypoints available to plot")
+            return
+
+        x_coordinates = [
+            waypoint.longitude for waypoint in self.waypoint_list_robot_frame
+        ]
+
+        y_coordinates = [
+            waypoint.latitude for waypoint in self.waypoint_list_robot_frame
+        ]
+
+        figure, axis = plt.subplots(figsize=(8, 6))
+
+        axis.plot(
+            x_coordinates,
+            y_coordinates,
+            marker="o",
+            linestyle="-",
+            label="Waypoint path",
         )
-        # COMPLETE YOUR CODE HERE
-        pass
+
+        axis.scatter(0.0, 0.0, color="red", marker="x", label="Robot origin")
+
+        arrow_length = 5.0
+
+        for index, waypoint in enumerate(self.waypoint_list_robot_frame):
+            x = waypoint.longitude
+            y = waypoint.latitude
+
+            axis.arrow(
+                x,
+                y,
+                arrow_length * math.cos(waypoint.orientation),
+                arrow_length * math.sin(waypoint.orientation),
+                head_width=1.5,
+                length_includes_head=True,
+                color="orange",
+            )
+
+            axis.annotate(str(index), (x, y), xytext=(5, 5),
+                        textcoords="offset points")
+
+        axis.set_xlabel("x [m]")
+        axis.set_ylabel("y [m]")
+        axis.set_title("Waypoints in robot coordinate frame")
+        axis.set_aspect("equal", adjustable="datalim")
+        axis.grid(True)
+        axis.legend()
+
+        output_path = Path.cwd() / "waypoints_robot_frame.png"
+
+        figure.tight_layout()
+        figure.savefig(output_path, dpi=150)
+        plt.close(figure)
+
+        self.get_logger().info(f"Waypoint plot saved to {output_path}")
 
     def get_robot_waypoints_callback(self, request, response):
         response.waypoints = self.waypoint_list_robot_frame
@@ -165,14 +218,13 @@ class WaypointManager(Node):
         return response
 
     def reset_waypoints_callback(self, request, response):
-        response.waypoints = []
+        self.waypoint_list_geo = []
+        self.waypoint_list_robot_frame = []
+
+        response.success = True
+        response.message = "Waypoints reset"
 
         return response
-
-    def call_set_waypoints_geo(self, request):
-        self.future = self.set_waypoint_client.call_async(request)
-        rclpy.spin_until_future_complete(self, self.future)
-        return self.future.result()
 
 
 def main(args=None):
@@ -180,19 +232,13 @@ def main(args=None):
 
     waypoint_manager = WaypointManager()
 
-    set_waypoints_msg = SetWaypoints.Request()
-    set_waypoints_msg.file_path = "/your_path/waypoints.geojson"
-    response = waypoint_manager.call_set_waypoints_geo(set_waypoints_msg)
-    if response.success == True:
-        waypoint_manager.convert_waypoints_to_robot_frame()
-        waypoint_manager.plot_waypoints()
-    else:
-        print("No waypoints loaded")
-
-    rclpy.spin(waypoint_manager)
-
-    rclpy.shutdown()
-
+    try:
+        rclpy.spin(waypoint_manager)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        waypoint_manager.destroy_node()
+        rclpy.shutdown()
 
 if __name__ == "__main__":
     main()
