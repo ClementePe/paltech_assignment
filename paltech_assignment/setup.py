@@ -25,7 +25,8 @@ setup(
     tests_require=["pytest"],
     entry_points={
         "console_scripts": [
-            "waypoint_manager = paltech_assignment.waypoint_manager:main"
+            "waypoint_manager = paltech_assignment.waypoint_manager:main",
+            "path_planning = paltech_assignment.path_planning:main",
         ],
     },
 )
