@@ -6,6 +6,7 @@ from std_srvs.srv import Trigger
 import json
 
 from pathlib import Path
+import math
 
 
 class WaypointManager(Node):
@@ -20,7 +21,7 @@ class WaypointManager(Node):
         self.reset_waypoint_srv = self.create_service(
             Trigger, "reset_waypoints", self.reset_waypoints_callback
         )
-        self.robot_inital_geo = (47.740114, 10.322442)
+        self.robot_initial_geo = (47.740114, 10.322442)
 
         self.waypoint_list_geo = []  # needs to be an array of Waypoint() messages
         self.waypoint_list_robot_frame = []
@@ -75,7 +76,7 @@ class WaypointManager(Node):
                 loaded_waypoints.append(waypoint)
 
             self.waypoint_list_geo = loaded_waypoints
-            self.waypoint_list_robot_frame = []
+            self.convert_waypoints_to_robot_frame()
 
             self.get_logger().info(
                 f"Loaded {len(self.waypoint_list_geo)} geographic waypoints"
@@ -89,12 +90,66 @@ class WaypointManager(Node):
         return response
 
     def convert_waypoints_to_robot_frame(self):
-        # COMPLETE YOUR CODE HERE
+        if not self.waypoint_list_geo:
+            self.waypoint_list_robot_frame = []
+            self.get_logger().warning("No geographic waypoints available to convert")
+            return
+
+        earth_radius = 6371000.0
+
+        origin_latitude, origin_longitude = self.robot_initial_geo
+
+        origin_latitude_rad = math.radians(origin_latitude)
+        origin_longitude_rad = math.radians(origin_longitude)
+
+        converted_waypoints = []
+
+        for waypoint in self.waypoint_list_geo:
+            latitude_rad = math.radians(waypoint.latitude)
+            longitude_rad = math.radians(waypoint.longitude)
+
+            average_latitude = (latitude_rad + origin_latitude_rad) / 2.0
+
+            x = (
+                earth_radius
+                * (longitude_rad - origin_longitude_rad)
+                * math.cos(average_latitude)
+            )
+
+            y = earth_radius * (latitude_rad - origin_latitude_rad)
+
+            robot_waypoint = Waypoint()
+            robot_waypoint.longitude = x
+            robot_waypoint.latitude = y
+            robot_waypoint.orientation = 0.0
+
+            converted_waypoints.append(robot_waypoint)
+
+        for index in range(len(converted_waypoints) - 1):
+            current_waypoint = converted_waypoints[index]
+            next_waypoint = converted_waypoints[index + 1]
+
+            delta_x = next_waypoint.longitude - current_waypoint.longitude
+            delta_y = next_waypoint.latitude - current_waypoint.latitude
+
+            current_waypoint.orientation = math.atan2(delta_y, delta_x)
+
+        if len(converted_waypoints) > 1:
+            converted_waypoints[-1].orientation = converted_waypoints[-2].orientation
+
+        self.waypoint_list_robot_frame = converted_waypoints
+
         self.get_logger().info(
-            f" Task 2: Waypoints in robot frame:  {self.waypoint_list_robot_frame}"
+            f"Converted {len(converted_waypoints)} waypoints to the robot frame"
         )
 
-        pass
+        for index, waypoint in enumerate(converted_waypoints):
+            self.get_logger().info(
+                f"Waypoint {index}: "
+                f"x={waypoint.longitude:.2f} m, "
+                f"y={waypoint.latitude:.2f} m, "
+                f"yaw={waypoint.orientation:.3f} rad"
+            )
 
     def plot_waypoints(self):
         self.get_logger().info(
@@ -104,7 +159,8 @@ class WaypointManager(Node):
         pass
 
     def get_robot_waypoints_callback(self, request, response):
-        response.waypoints = self.waypoint_list_geo
+        response.waypoints = self.waypoint_list_robot_frame
+        response.success = bool(self.waypoint_list_robot_frame)
 
         return response
 
